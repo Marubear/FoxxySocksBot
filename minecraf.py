@@ -12,9 +12,6 @@ from telegram.ext import Updater, CommandHandler, Filters, MessageHandler, Callb
 from telegram import Update
 import config
 
-dbConnect = mariadb.connect(user=config.dbuser, password=config.dbpass, database=config.db, host=config.dbhost)
-cursor = dbConnect.cursor()
-cursor.execute("USE Furrit")
 
 botUpdate = Updater(token=config.token, use_context=True)
 
@@ -68,17 +65,39 @@ def deleteMessage(message, context):
 
 
 """
+Method: Database Query
+Purpose: Run queries and return results
+Future: A bit rushed together, could use some cleaning up
+"""
+def dbQuery(query, ret):
+    dbConnect = mariadb.connect(user=config.dbuser, password=config.dbpass, database=config.db, host=config.dbhost)
+    cursor = dbConnect.cursor()
+    cursor.execute("USE Furrit")
+
+    cursor.execute(query)
+    value = None
+    try:
+        value = cursor.fetchall()
+    except Exception as e:
+        pass
+    dbConnect.commit()
+    dbConnect.close()
+    if ret:
+        return value
+
+
+"""
 Method: Add User
 Purpose: Use a message to get the name and uid to make a new user in the database
 Future: This is probably bad security, I don't care right now
 """
 def addUser(message):
-    query = "insert into gamer (name, uid) values (%s, %s)"
     name = message.from_user.first_name
     uid = message.from_user.id
-    vals = [name, uid]
-    cursor.execute(query, vals)
-    dbConnect.commit()
+    auquery = "insert into gamer (name, uid) values (\"%s\", \"%s\")" % (name, uid)
+
+    dbQuery(auquery, False)
+
 
 
 """
@@ -87,9 +106,9 @@ Purpose: Get codes for a user and print them all nice
 Future: Works well, not really expandable
 """
 def printCodes(uid, bot, message):
-    query = "Select * from gamer where uid = %s"
-    cursor.execute(query, [uid])
-    values = cursor.fetchone()
+    pcquery = "Select * from gamer where uid = %s" % (uid)
+    values = dbQuery(pcquery, True)
+    values = values[0]
     types = ["Switch", "Steam", "Origin", "Xbox", "Epic", "GoG", "PSN", "Uplay", "3ds", "Minecraft"]
     string = "Name: " + values[0] + "\n"
     i = 0
@@ -113,10 +132,10 @@ def getCodes(update: Update, context: CallbackContext):
 
     if len(message) == 1:
         printCodes(uid, context.bot, update.message)
-    elif len(message) ==2:
-        query = "Select * from gamer where name like \"%" + message[1] + "%\""
-        cursor.execute(query)
-        userValues = cursor.fetchone()
+    elif len(message) == 2:
+
+        gcquery = "Select * from gamer where name like \"%" + message[1] + "%\""
+        userValues = dbQuery(gcquery, True)[0]
         if userValues:
             printCodes(userValues[1], context.bot, update.message)
         else:
@@ -149,17 +168,16 @@ probably an avenue for sqlinjection. Shouldn't be due to the possible fields che
 def addCode(update: Update, context: CallbackContext):
     message = update.message
     user = message.from_user.id
-    query = "select * from gamer where uid = %s"
-    cursor.execute(query, [user])
-    records = cursor.fetchall()
+    acquery = "select * from gamer where uid = %s" % user
+    records = dbQuery(acquery, True)
     if not records:
         addUser(message)
     fields = message.text.split(" ")[1:]
     FIELD_ENUM = ["Switch", "Minecraft", "Steam", "Origin", "Xbox", "PSN", "Epic", "GoG", "Uplay", "3DS"]
-    if len(fields) == 1:
+    if len(fields) == 0:
         context.bot.send_message(chat_id=message.chat_id, text="Added")
         return
-    elif len(fields) % 2 != 0 or len(fields) == 0:
+    elif len(fields) % 2 != 0:
         context.bot.send_message(chat_id=message.chat_id, text="Invalid add command, please ask an admin")
         return
     codes = split(fields, 2)
@@ -170,11 +188,10 @@ def addCode(update: Update, context: CallbackContext):
         upQuery = "UPDATE gamer SET %s = \"%s\" WHERE uid = \"%s\"" % (str(code[0].lower()), str(code[1]), str(user))
 
         try:
-            cursor.execute(upQuery)
-            dbConnect.commit()
+            dbQuery(upQuery, False)
 
-
-        except:
+        except Exception as e:
+            print("Error: User " + user + e)
             context.bot.send_message(chat_id=message.chat_id, text="Something went wrong")
     printCodes(user, context.bot, update.message)
 
@@ -186,13 +203,38 @@ Future: Should keep working fine
 """
 def names(update: Update, context: CallbackContext):
     query = "SELECT name FROM gamer"
-    cursor.execute(query)
-    names = cursor.fetchall()
+    name_list = dbQuery(query, True)
     string = "Users: "
-    for part in names:
+    for part in name_list:
         string += part[0] + ", "
 
     context.bot.send_message(chat_id=update.message.chat_id, text=string[:-2])
+
+
+"""
+Method: Get Service Codes
+Purpose: Lets a user list all the users who use a service and what their codes are
+Future: I still feel weird about using the enum to col names thing, but it works and I think it's safe for now
+"""
+def getServiceCodes(update: Update, context: CallbackContext):
+    FIELD_ENUM = ["Switch", "Minecraft", "Steam", "Origin", "Xbox", "PSN", "Epic", "GoG", "Uplay", "3DS"]
+    message = update.message
+    serviceMessage = message.text.split(" ")
+    if len(serviceMessage) == 2:
+        service = serviceMessage[1]
+    else:
+        context.bot.send_message(chat_id=message.chat_id, text="One service at a time please")
+        return
+    if service in FIELD_ENUM:
+        gscquery = "Select name, " + service + " from gamer where " + service + " is not null;"
+        values = dbQuery(gscquery, True)
+        string = "Entries for " + service + ":\n"
+        for value in values:
+            string += value[0] + ": " + value[1] + '\n'
+        context.bot.send_message(chat_id=message.chat_id, text=string)
+
+    else:
+        context.bot.send_message(chat_id=message.chat_id, text=service + " is not a valid service (check capitalization)")
 
 
 """
@@ -239,5 +281,9 @@ dispatcher.add_handler(nameHandle)
 # Handler for Minecraft server stuff
 mcHandle = CommandHandler('mc', MCServerStatus, pass_chat_data=True)
 dispatcher.add_handler(mcHandle)
+
+# Handler for Service command
+GSCHandle = CommandHandler('service', getServiceCodes, pass_chat_data=True)
+dispatcher.add_handler(GSCHandle)
 
 botUpdate.start_polling(clean=True)
