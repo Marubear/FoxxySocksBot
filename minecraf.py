@@ -28,7 +28,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 Method: Welcome
 Purpose: Triggered by handler upon new user entering. Give user the rules, restrict their access and give them a simple
 test against bots. 
-Future: Stop hard coding rules, allow the rules to be changed, make it chat agnostic. 
+Future: Pretty simple, changes needed are miniumal
 """
 def welcome(update: Update, context: CallbackContext):
     message = ", welcome gamer"
