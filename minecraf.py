@@ -6,11 +6,10 @@ Future: Keep adding features, deal with possible sql injection issues
 """
 
 import logging
-
+from mcstatus import MinecraftServer
 import mysql.connector as mariadb
-from telegram import Update
 from telegram.ext import Updater, CommandHandler, Filters, MessageHandler, CallbackContext
-
+from telegram import Update
 import config
 
 dbConnect = mariadb.connect(user=config.dbuser, password=config.dbpass, database=config.db, host=config.dbhost)
@@ -23,6 +22,7 @@ dispatcher = botUpdate.dispatcher
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+server = MinecraftServer.lookup(config.mchost)
 
 """
 Method: Welcome
@@ -195,6 +195,27 @@ def names(update: Update, context: CallbackContext):
     context.bot.send_message(chat_id=update.message.chat_id, text=string[:-2])
 
 
+"""
+Method: Minecraft Server Status
+Purpose: Check the status of the various minecraft servers we run
+Future: Track more servers as they exist
+"""
+def MCServerStatus(update: Update, context: CallbackContext):
+    status = server.status()
+    players = "Players online:\n"
+    onlinePlayers = status.players.sample
+
+    if onlinePlayers:
+        for player in status.players.sample:
+            players += player.name + ", "
+        players = players[:-2]
+
+    message = config.mcname + ":\nThe server replied with a ping of " + str(status.latency) + " ms and there are " + str(status.players.online) + " people on.\n"
+    message = message + players
+
+    context.bot.send_message(chat_id=update.message.chat_id, text=message)
+
+
 # Handler for welcome message and user checks
 welcomeHandle = MessageHandler(Filters.status_update.new_chat_members, welcome, pass_chat_data=True)
 dispatcher.add_handler(welcomeHandle)
@@ -214,5 +235,9 @@ dispatcher.add_handler(getHandle)
 # Handler for the names command
 nameHandle = CommandHandler('names', names, pass_chat_data=True)
 dispatcher.add_handler(nameHandle)
+
+# Handler for Minecraft server stuff
+mcHandle = CommandHandler('mc', MCServerStatus, pass_chat_data=True)
+dispatcher.add_handler(mcHandle)
 
 botUpdate.start_polling(clean=True)
